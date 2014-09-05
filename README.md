@@ -1,0 +1,1 @@
+Android TTS demo for Acapela SDK, fix word position
