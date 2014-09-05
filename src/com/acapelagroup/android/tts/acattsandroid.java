@@ -7,34 +7,18 @@
 //  Copyright Acapela Group All rights reserved.
 //
 
-
 package com.acapelagroup.android.tts;
 
-import android.util.Log;
-
-import android.media.AudioTrack;
-import android.media.AudioFormat;
-import android.media.AudioManager;
-import android.media.AudioTrack.OnPlaybackPositionUpdateListener;
-
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
-import java.io.File;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
-import android.media.AudioTrack.OnPlaybackPositionUpdateListener;
 import android.os.Handler;
 import android.util.Log;
 
-public class acattsandroid implements OnPlaybackPositionUpdateListener {
+public class acattsandroid {
 
 	public static final int EVENT_TEXT_START = 0;
 	public static final int EVENT_TEXT_END = 1;
@@ -58,7 +42,8 @@ public class acattsandroid implements OnPlaybackPositionUpdateListener {
 
 	// TTS events callback interface
 	public interface iTTSEventsCallback {
-		public void ttsevents(long type, long param1, long param2, long param3, long param4);
+		public void ttsevents(long type, long param1, long param2, long param3,
+				long param4);
 	};
 
 	private iTTSEventsCallback pttseventcallback;
@@ -71,17 +56,6 @@ public class acattsandroid implements OnPlaybackPositionUpdateListener {
 	AudioTrack audioTrack;
 	int audioTrackSize;
 	int audioBufferSize;
-
-	// Word positions events list
-	List<wordposevent> wordposeventslist = new ArrayList<wordposevent>();
-
-	// Word position indexes and flags
-	int currenteventindex = 0;
-	int lasteventindex = 0;
-	long lasteventsampval = 0;
-	long samploop = 0;
-	private long endaudiosampval;
-	private long endaudiosampval2;
 
 	// Stop flag to stop word positions events
 	int stopevents = 0;
@@ -102,73 +76,6 @@ public class acattsandroid implements OnPlaybackPositionUpdateListener {
 		pttseventcallback = ttseventcallback;
 	}
 
-	synchronized public void addaudiomarker() {
-
-		while (true) {
-			do {
-				try {
-					wait();
-				} catch (InterruptedException e) {
-					log(Arrays.toString(e.getStackTrace()));
-				}
-			} while (currenteventindex >= wordposeventslist.size());
-
-			// The last event is the totalsample played so no need to shift
-			if (endaudiosampval > 0) {
-				audioTrack.setNotificationMarkerPosition((int) wordposeventslist.get(currenteventindex).sampval);
-				endaudiosampval2 = endaudiosampval;
-				endaudiosampval = 0;
-			} else {
-				// Word pos events need to be shifted based on their current buffer
-				int samplepos = (int) wordposeventslist.get(currenteventindex).sampval;
-				if (samplepos < lasteventsampval) {
-					samploop++;
-				}
-				lasteventsampval = wordposeventslist.get(currenteventindex).sampval;
-				samplepos = (int) ((audioBufferSize / 2 * samploop) + samplepos); // (16bits -> /2)
-
-				audioTrack.setNotificationMarkerPosition((int) samplepos);
-			}
-		}
-	}
-
-	// Word positions thread
-	Thread wordposeventsthread = new Thread() {
-		@Override
-		public void run() {
-			addaudiomarker();
-		}
-	};
-
-	@Override
-	public synchronized void onMarkerReached(AudioTrack track) {
-
-		// Last audio event received
-		if (track.getPlaybackHeadPosition() >= endaudiosampval2 && endaudiosampval2 > 0) {
-			pttseventcallback.ttsevents(EVENT_AUDIO_END, endaudiosampval2, 0, 0, 0);
-			endaudiosampval2 = 0;
-		}
-		// Audio marker received
-		else if (wordposeventslist.size() > currenteventindex && stopevents == 0) {
-			// Push the event to the application
-			// pttseventcallback.ttsevents(EVENT_WORD_POS, wordposeventslist.get(currenteventindex).pos,
-			// wordposeventslist.get(currenteventindex).len, wordposeventslist.get(currenteventindex).sampval, 0);
-
-		}
-
-		currenteventindex++;
-		lasteventindex--;
-
-		// Wake up word position event thread
-		notify();
-
-	}
-
-	@Override
-	public void onPeriodicNotification(AudioTrack track) {
-
-	}
-
 	// Callback that receives audio sample from TTS
 	private void samplesCallback(short[] buff, long samples) {
 		// Write the samples to the opened track
@@ -180,9 +87,8 @@ public class acattsandroid implements OnPlaybackPositionUpdateListener {
 	Handler handle = new Handler();
 
 	// Callback that receives events from TTS
-	private synchronized long eventsCallback(long type, final long param1, final long param2, final long param3,
-			long param4) {
-
+	private synchronized long eventsCallback(long type, final long param1,
+			final long param2, final long param3, long param4) {
 		// Push events only if requested by the application
 		if (pttseventcallback == null)
 			return 0;
@@ -194,59 +100,38 @@ public class acattsandroid implements OnPlaybackPositionUpdateListener {
 
 		if (type == EVENT_TEXT_END) {
 			pttseventcallback.ttsevents(type, param1, param2, param3, param4);
-			if (stopevents == 1) {
-				pttseventcallback.ttsevents(EVENT_AUDIO_END, param2, 0, 0, 0);
-			} else {
-				wordposeventslist.add(new wordposevent(0, 0, param2));
-				endaudiosampval = param2;
-				if (lasteventindex == 0) {
-					notify();
-				}
-				lasteventindex++;
-			}
+			pttseventcallback.ttsevents(EVENT_AUDIO_END, param2, 0, 0, 0);
 
 		}
 
 		if (type == EVENT_WORD_POS) {
-
-			// If offset is 0 move it a little bit otherwise audio is not able to reach marker with 0
-			// if (param3 == 0)
-			// param3 = 40;
-
-			// New word position event. Add it in the list
-			// if (stopevents == 1) {
 			handle.post(new Runnable() {
 				public void run() {
-					pttseventcallback.ttsevents(EVENT_WORD_POS, param1, param2, param3, 0);
+					pttseventcallback.ttsevents(EVENT_WORD_POS, param1, param2,
+							param3, 0);
 				}
 			});
-
-			// }
-			wordposeventslist.add(new wordposevent(param1, param2, param3));
-
-			// We already consumed all the events so wake up the event thread for this new one
-			if (lasteventindex == 0) {
-				notify();
-			}
-			lasteventindex++;
 		}
 
 		return 0;
 	}
 
 	// Initialize audio with voice sample rate
+	@SuppressWarnings("deprecation")
 	private int initAudio(int sample_rate) {
 		if (sample_rate != 0) {
 
-			audioTrackSize = android.media.AudioTrack.getMinBufferSize(sample_rate,
-					AudioFormat.CHANNEL_CONFIGURATION_MONO, AudioFormat.ENCODING_PCM_16BIT);
-			audioTrack = new AudioTrack(AudioManager.STREAM_MUSIC, sample_rate, AudioFormat.CHANNEL_CONFIGURATION_MONO,
-					AudioFormat.ENCODING_PCM_16BIT, audioTrackSize, AudioTrack.MODE_STREAM);
+			audioTrackSize = android.media.AudioTrack.getMinBufferSize(
+					sample_rate, AudioFormat.CHANNEL_CONFIGURATION_MONO,
+					AudioFormat.ENCODING_PCM_16BIT);
+			audioTrack = new AudioTrack(AudioManager.STREAM_MUSIC, sample_rate,
+					AudioFormat.CHANNEL_CONFIGURATION_MONO,
+					AudioFormat.ENCODING_PCM_16BIT, audioTrackSize,
+					AudioTrack.MODE_STREAM);
 			if (audioTrack == null)
 				return -1;
 
 			audioBufferSize = nGetAudioBufferSize();
-			audioTrack.setPlaybackPositionUpdateListener(this);
 		}
 
 		return 0;
@@ -286,8 +171,10 @@ public class acattsandroid implements OnPlaybackPositionUpdateListener {
 		shutdown();
 
 		// Retrieve string list for both speaker and ini array
-		String voicesList[] = (String[]) speakersArray.toArray(new String[speakersArray.size()]);
-		String iniVoicesList[] = (String[]) iniVoicesArray.toArray(new String[iniVoicesArray.size()]);
+		String voicesList[] = (String[]) speakersArray
+				.toArray(new String[speakersArray.size()]);
+		String iniVoicesList[] = (String[]) iniVoicesArray
+				.toArray(new String[iniVoicesArray.size()]);
 
 		int index = 0;
 
@@ -302,18 +189,17 @@ public class acattsandroid implements OnPlaybackPositionUpdateListener {
 
 		int sample_rate = nLoadVoice(iniVoicesList[index]);
 
-		if (sample_rate == 8000 || sample_rate == 11025 || sample_rate == 16000 || sample_rate == 22050) {
+		if (sample_rate == 8000 || sample_rate == 11025 || sample_rate == 16000
+				|| sample_rate == 22050) {
 			initAudio(sample_rate);
 		} else
 			return sample_rate;
 
-		if (wordposeventsthread.isAlive() == false)
-			wordposeventsthread.start();
-
 		return 0;
 	}
 
-	// Speak Text - Stop the current TTS speaking - Stop the current TTS speaking
+	// Speak Text - Stop the current TTS speaking - Stop the current TTS
+	// speaking
 	public int speak(String text) {
 		log("speak");
 		stop();
@@ -453,7 +339,8 @@ public class acattsandroid implements OnPlaybackPositionUpdateListener {
 			String voicesList[] = { "" };
 			return voicesList;
 		} else {
-			String voicesList[] = (String[]) speakersArray.toArray(new String[speakersArray.size()]);
+			String voicesList[] = (String[]) speakersArray
+					.toArray(new String[speakersArray.size()]);
 			return voicesList;
 		}
 	}
@@ -549,15 +436,7 @@ public class acattsandroid implements OnPlaybackPositionUpdateListener {
 
 	// Reset flags and index
 	private void resetindexes() {
-
-		lasteventindex = 0;
-		currenteventindex = 0;
-		samploop = 0;
 		stopevents = 0;
-		wordposeventslist.clear();
-		lasteventsampval = 0;
-		endaudiosampval = 0;
-		endaudiosampval2 = 0;
 	}
 
 	private void log(String logmessage) {

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">AndroidTTSDemo</string>
+    <string name="app_name">Acapela TTS Demo</string>
   
     <string name="success">All data has been downloaded successfully.</string>
     <string name="download_again">Download again</string>
